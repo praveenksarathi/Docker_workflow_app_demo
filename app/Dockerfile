@@ -1,3 +1,3 @@
 FROM tfennelly/tomcat7
 
-ADD target/fruits.war /tomcat7/webapps/fruits.war
+ADD target/fruits.jar /tomcat7/webapps/fruits.jar
