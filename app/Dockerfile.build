@@ -1,0 +1,5 @@
+FROM maven:3.3.9-jdk-8
+#FROM alirizasaral/maven-with-proxy
+#RUN apt-get update
+#COPY settings.xml /usr/share/maven/conf/settings.xml
+CMD mvn -f app -B -DskipTests clean package
