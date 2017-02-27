@@ -5,7 +5,7 @@
   <groupId>org.aricent</groupId>
   <artifactId>fruits</artifactId>
   <version>0.0.1-SNAPSHOT</version>
-  <packaging>war</packaging>
+  <packaging>jar</packaging>
 
   <name>fruits</name>
   <url>http://maven.apache.org</url>
