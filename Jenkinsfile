@@ -1,93 +1,149 @@
+/***********************************************************************
+                         Aricent Technologies Proprietary
+ 
+This source code is the sole property of Aricent Technologies. Any form of utilization
+of this source code in whole or in part is  prohibited without  written consent from
+Aricent Technologies
+ 
+File Name			  :Jenkinsfile
+Principal Author	  :PRAVEEN KUMAR KRISHNAMOORTHY
+Subsystem Name        :Jenkins Pipeline Study
+Module Name           :
+Date of First Release : Feb 25, 2017
+Author                :PRAVEEN KUMAR KRISHNAMOORTHY
+Description           :This is a sample program to study Continous Integration
+Version               :1.0
+Date(DD/MM/YYYY)      :Feb 25, 2017
+Modified by           : PRAVEEN KUMAR KRISHNAMOORTHY
+Description of change :Forked From 
+ 
+***********************************************************************/
+
+def TempDocker = 'ec2-13-55-19-58.ap-southeast-2.compute.amazonaws.com'
+def permDocker = 'ec2-13-54-206-33.ap-southeast-2.compute.amazonaws.com'
 node {
-  def PWD = pwd()
-  //Purposefully commented for frequent API layer test
-  /*
-  stage('Code Pickup') {
-    git 'https://github.com/RameshThangamuthu/docker_workflow_plugin_demo.git'
+    def str = scmPassword
+    //To escape all Special Charecters in a given input string password
+    scmPassword = str.replaceAll( /([^a-zA-Z0-9])/, '\\\\$1' )
+    stage('Code Pickup') {
+    echo "Source Code Repository Type : ${CodeType}"
+    echo "Source Code Repository Path : ${CodeLoc}"
+    
+    if("${CodeType}".toUpperCase()=='SVN'){
+        sh "svn co --username ${scmUsername} --password ${scmPassword} ${CodeLoc} ."
+        
+    } else if("${CodeType}".toUpperCase()=='GIT'){
+        CodeLoc = CodeLoc.substring(0, CodeLoc.indexOf("//")+2) + scmUsername + ":" + scmPassword + "@" +CodeLoc.substring(CodeLoc.indexOf("//")+2, CodeLoc.length());
+        try {
+            sh 'ls -a | xargs rm -fr' 
+        } catch (error) {
+        }
+        sh "git clone ${CodeLoc} ."        
+    } else {
+        error 'Unknown Source code repository. Only GIT and SVN are supported'
+    }
+  } 
+//END OF CODE PICKUP STAGE
+//_______________________________________________________________________________________________________________________________________________________________________  
+//BUILD & PACKAGE
+def appModuleSeperated = fileExists 'app'
+def testModuleSeperated = fileExists 'test'
+def appPath = ''
+def testPath = ''  
+if (appModuleSeperated) {
+    echo 'App Module is found , assumed that application is present in /app directory'
+    appPath='app/'
+} else {
+    echo 'There is no defined Application path , hence it is assumed that application is in current directory'
+    appPath = ''
+}
+
+if (testModuleSeperated) {
+    echo 'Test Module is found , assumed that Test Cases are Present for the concerned Modules and has to be performed'
+    testPath = 'test/'
+} else {
+    echo 'No Test Modules found , hence it is assumed that no test environment and / or test cases to be performed'
+    testPath = ''
+}
+def isBuildAndPackageRequired = true
+def buildDockerFile = appPath + 'Dockerfile.build'
+def distDockerFile = appPath + 'Dockerfile.dist'
+if (fileExists(buildDockerFile) && fileExists(distDockerFile)) {
+    echo 'Looks like this application contains seperate Build and Distribution Docker Files , its assumed to be developed in compiler dependant programming language.'
+    isBuildAndPackageRequired = true;    
+} else if (appPath + fileExists('Dockerfile')) {
+    echo 'This application contains a single docker file , it is assumed to be developed in compiler in-dependant / interpreter based programming language.'
+    isBuildAndPackageRequired = false;
+    distDockerFile = appPath + 'Dockerfile'
+} else {
+    echo 'Dockerfile not found under ' + appPath
+  }
+// COPYING APP Directory to Current Working Directory
+  def appWorkingDir = (appPath=='') ? '.' : appPath.substring(0, appPath.length()-1)  
+// NEXUS file for Time Stamp comparison. This file is used for comparing time stamps and differentiating input files from generated output files.        
+    sh 'echo Nexus>Nexus.txt'
+//END OF INITIALIZING.
+//_______________________________________________________________________________________________________________________________________________________________________  
+//BUILD & PACKING
+if(isBuildAndPackageRequired){
+    echo 'Compile and Packaging runs as separate entities , it is inferred that the App package is compiler dependant.'
+    stage('Compile, Unit Test & Package') {
+      echo 'Working Directory for Docker Build file: ' + appWorkingDir
+      echo "Build Tag Name: ${dockerRepo}/${dockerImageName}-build:${env.BUILD_NUMBER}"
+      echo "Build params: --file ${buildDockerFile} ${appWorkingDir}"
+      
+      appCompileAndPackageImg = docker.build("${dockerRepo}/${dockerImageName}-build:${env.BUILD_NUMBER}", "--file ${buildDockerFile} ${appWorkingDir}")      
+      
+def dockerCMD = readFile buildDockerFile
+echo dockerCMD.substring(dockerCMD.indexOf('CMD')+3, dockerCMD.length())      
+appCompileAndPackageImg.inside('--net=host') {        
+sh dockerCMD.substring(dockerCMD.indexOf('CMD')+3, dockerCMD.length())
+}
+}
+} else {
+echo 'Compile and Package are not seperate steps , it is inferred that the package is not compiler dependant'
+}
+  //---------------------------------------
+  
+  if("${stage}".toUpperCase() == 'BUILD') {
+    echo 'It is inferred that the package is a Build only application , hence it is moved to a temporary repository'
+    docker.withRegistry("http://${TempDocker}/", 'docker-registry-login') {
+      def pcImg
+      stage('Dockerization & Stage') {
+        pcImg = docker.build("${dockerRepo}/${dockerImageName}:${env.BUILD_NUMBER}", "--file ${distDockerFile} ${appWorkingDir}")
+        pcImg.push();
+      }
+    }   
+  } else if ("${stage}".toUpperCase() == 'DEPLOY') {
+    echo 'It is inferred that the package is a deploy only application , hence it has to be moved to a permanent repository'
+    docker.withRegistry("https://${permDocker}/", 'docker-registry-login') {
+      def pcImg
+      stage('Dockerization & Publish') {
+        pcImg = docker.build("${dockerRepo}/${dockerImageName}:${env.BUILD_NUMBER}", "--file ${distDockerFile} ${appWorkingDir}")
+        pcImg.push('latest');
+      }
+    }    
+  } else if ("${stage}".toUpperCase() == 'CERTIFY'){
+    echo 'It is inferred that the package is a certify only application , hence it has to be moved to a provisioned with a runtime sandbox environment and push it to temporary repository'
+    docker.withRegistry("http://${TempDocker}/", 'docker-registry-login') {
+      def pcImg
+      stage('Certify') {
+        pcImg = docker.build("${dockerRepo}/${dockerImageName}:${env.BUILD_NUMBER}", "--file ${distDockerFile} ${appWorkingDir}")
+        pcImg.push('SNAPSHOT');
+      }
+    }   
   }
   
-  stage('Build') {
-      appCompileAndPackageImg = docker.build("mec/application-build:${env.BUILD_TAG}", "--file app/Dockerfile.build app")      
-    
-      def dockerCMD = readFile 'app/Dockerfile.build'
-      echo dockerCMD.substring(dockerCMD.indexOf('CMD')+3, dockerCMD.length())
-      
-      appCompileAndPackageImg.inside {        
-        sh dockerCMD.substring(dockerCMD.indexOf('CMD')+3, dockerCMD.length())
-      }
-  }*/
-    
-    
-    
-    /*  
-    appCompileAndPackageImg.withRun {       
-          buildContainer->sh "/bin/sh"
-      } 
-    
-      
-      appCompileAndPackageImg.inside {        
-        sh "mvn -f app -B clean package"    
-        sh "/bin/sh"
-      }
+  stage ('Execute'){
+    pcImg.inside {
+       python 'app/app_delete.py'
     }
-  */
-    /*
-    try{     
-      sh "docker run --name ${env.BUILD_TAG}  -t -d -u 0:0 -w ${PWD} --volumes-from d6189a8e5ee9ed30127d402eef609852b7e8328a19621c6c12235b07d3343244 mec/application-build:${env.BUILD_TAG}"
-    }finally{
-       
-    }
-  */
-/*
-  // We are pushing to a private secure Docker registry in this demo.
-  // 'docker-registry-login' is the username/password credentials ID as defined in Jenkins Credentials.
-  // This is used to authenticate the Docker client to the registry.
-  docker.withRegistry('http://localhost/', 'docker-registry-login') {
-    def pcImg
-    stage('Bake Docker image') {
-      // Use the spring-petclinic Dockerfile (see above 'maven.inside()' block)
-      // to build a container that can run the app.
-      // The Dockerfile is in the app subdir of the active workspace
-      // (see above maven.inside() block), so we specify that.
-      // The Dockerfile expects the petclinic.war file to be in the 'target' dir
-      // relative to its own directory, which will be the case.
-      pcImg = docker.build("mec/application:${env.BUILD_TAG}", 'app')
-      // Let us tag and push the newly built image. Will tag using the image name provided
-      // in the 'docker.build' call above (which included the build number on the tag).
-      pcImg.push();
-    }
-    stage('Test Image') {
-      // Spin up a Maven + Xvnc test container, linking it to the petclinic app container
-      // allowing the Maven tests to send HTTP requests between the containers.
-      def testImg = docker.build('mec/application-tests:snapshot', 'test')
-      // Run the petclinic app in its own Docker container.
-      pcImg.withRun {petclinic ->
-        testImg.inside("--link=${petclinic.id}:petclinic") {
-          // https://github.com/jenkinsci/workflow-plugin/blob/master/basic-steps/CORE-STEPS.md#build-wrappers
-          wrap([$class: 'Xvnc', takeScreenshot: true, useXauthority: true]) {
-            //Ramesh - Offline mode did not work
-            //sh "mvn -o -Dmaven.repo.local=${pwd tmp: true}/m2repo -f test -B clean test"
-            //sh "Xvnc :10"
-            //sh "export DISPLAY=:10"
-            //sh "firefox --version"
-            sh "mvn -f test -B clean test"
-          }
-        }
-      }
-      //input "How do you like ${env.BUILD_URL}artifact/screenshot.jpg?"
-      
-      /////RAMESH
-      //Push the image to a temporary registry and then
-      //CREATE an request in BugZilla to approve the build
-      ////RAMESH
-    }
-    /////RAMESH
-    //Get this stage invoked only on approval of the Bugzilla ticket. It basically means it will be a seperate job.
-    //On approval, invoke the build on the job which takes the local repo and pushes to remote repo
-    ///RAMESH
-    stage('Promote Image') {
-      // All the tests passed. We can now retag and push the 'latest' image.
-      //pcImg.push('latest')
-    }
-  } */
+  }
+//END OF IMAGE PUSHING INTO REPOSITORY
+// NEXUS UPDATE
+  stage('Publish Jenkins Output to Nexus'){
+        echo 'Publishing the artifacts...';
+        sh 'rm Nexus.txt'
+//NEXUS FLOW ENDS HERE
+  }
 }
