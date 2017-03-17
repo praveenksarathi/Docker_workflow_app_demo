@@ -104,11 +104,10 @@ sh dockerCMD.substring(dockerCMD.indexOf('CMD')+3, dockerCMD.length())
 echo 'Compile and Package are not seperate steps , it is inferred that the package is not compiler dependant'
 }
   //---------------------------------------
-  
+  def pcImg
   if("${stage}".toUpperCase() == 'BUILD') {
     echo 'It is inferred that the package is a Build only application , hence it is moved to a temporary repository'
     docker.withRegistry("http://${TempDocker}/", 'docker-registry-login') {
-      def pcImg
       stage('Dockerization & Stage') {
         pcImg = docker.build("${dockerRepo}/${dockerImageName}:${env.BUILD_NUMBER}", "--file ${distDockerFile} ${appWorkingDir}")
         pcImg.push();
@@ -117,7 +116,6 @@ echo 'Compile and Package are not seperate steps , it is inferred that the packa
   } else if ("${stage}".toUpperCase() == 'DEPLOY') {
     echo 'It is inferred that the package is a deploy only application , hence it has to be moved to a permanent repository'
     docker.withRegistry("https://${permDocker}/", 'docker-registry-login') {
-      def pcImg
       stage('Dockerization & Publish') {
         pcImg = docker.build("${dockerRepo}/${dockerImageName}:${env.BUILD_NUMBER}", "--file ${distDockerFile} ${appWorkingDir}")
         pcImg.push('latest');
@@ -126,19 +124,37 @@ echo 'Compile and Package are not seperate steps , it is inferred that the packa
   } else if ("${stage}".toUpperCase() == 'CERTIFY'){
     echo 'It is inferred that the package is a certify only application , hence it has to be moved to a provisioned with a runtime sandbox environment and push it to temporary repository'
     docker.withRegistry("http://${TempDocker}/", 'docker-registry-login') {
-      def pcImg
       stage('Certify') {
         pcImg = docker.build("${dockerRepo}/${dockerImageName}:${env.BUILD_NUMBER}", "--file ${distDockerFile} ${appWorkingDir}")
         pcImg.push('SNAPSHOT');
       }
     }   
   }
-  
+
   stage ('Execute'){
-    pcImg.inside {
-       python 'app/app_delete.py'
+      
+     if ("${SourceType}".toUpperCase() == 'PYTHON') {
+    pcImg.inside() {
+            sh 'easy_install unittest-xml-reporting'
+            sh "${SourceType} ${TargetFile}"
+//            sh "${SourceType} --junitxml results.xml ${TargetFile}"
     }
+}
+
+    else if ("${SourceType}".toUpperCase() == 'MAVEN') {
+    pcImg.inside() {
+//        sh 'apt-get install mvn'
+//        sh 'mvn -version'
+//        sh 'mvn clean install'
+//        sh 'mvn compile'
+//          sh 'mvn clean package'
+//          sh 'java -cp target/*.jar src.main.java.org.aricent.fruits.FruitMain'
+//          sh 'java target/*.jar org.aricent.fruits.FruitMain'
+          sh 'java target/*.jar FruitMain'
+    }
+}
   }
+
 //END OF IMAGE PUSHING INTO REPOSITORY
 // NEXUS UPDATE
   stage('Publish Jenkins Output to Nexus'){
