@@ -28,17 +28,43 @@ node {
     stage('Code Pickup') {
     echo "Source Code Repository Type : ${CodeType}"
     echo "Source Code Repository Path : ${CodeLoc}"
+    echo "HTTP Proxy: ${httpProxy}"
+    echo "HTTPS Proxy: ${httpsProxy}"
     
     if("${CodeType}".toUpperCase()=='SVN'){
         sh "svn co --username ${scmUsername} --password ${scmPassword} ${CodeLoc} ."
         
     } else if("${CodeType}".toUpperCase()=='GIT'){
+      if(scmPath.startsWith("ssh://")){
+       CodeLoc = CodeLoc.substring(0, CodeLoc.indexOf("//")+2) + scmUsername + "@" +CodeLoc.substring(CodeLoc.indexOf("//")+2, CodeLoc.length());     
+        } else {
+        CodeLoc = CodeLoc.substring(0, CodeLoc.indexOf("//")+2) + scmUsername + ":" + scmPassword + "@" +CodeLoc.substring(CodeLoc.indexOf("//")+2, CodeLoc.length());
+        }
         CodeLoc = CodeLoc.substring(0, CodeLoc.indexOf("//")+2) + scmUsername + ":" + scmPassword + "@" +CodeLoc.substring(CodeLoc.indexOf("//")+2, CodeLoc.length());
         try {
             sh 'ls -a | xargs rm -fr' 
         } catch (error) {
         }
-        sh "git clone ${CodeLoc} ."        
+ //______________________________________________________________________________________________________________________________________
+              if(CodeLoc.startsWith("ssh://")){
+          if(httpsProxy != null && httpProxy!=null && httpsProxy.length()>0 && httpProxy.length()>0){
+            echo "Looks like this Jenkins behind Proxy"
+            sh "export https_proxy=${httpsProxy} && export http_proxy=${httpProxy} && sshpass -p ${scmPassword}   git clone ${CodeLoc} ."
+          } else {
+            echo "Looks like this Jenkins is not behind Proxy"
+            sh "sshpass -p ${scmPassword}   git clone ${CodeLoc} ."
+          }            
+        } else {
+            if(httpsProxy != null && httpProxy!=null && httpsProxy.length()>0 && httpProxy.length()>0) {
+              echo "Looks like this Jenkins behind Proxy"
+              sh "export https_proxy=${httpsProxy} && export http_proxy=${httpProxy} && git clone ${CodeLoc} ."
+            } else {
+              echo "Looks like this Jenkins is not behind Proxy"
+              sh "git clone ${CodeLoc} ."
+            }            
+        } 
+ //______________________________________________________________________________________________________________________________________
+ //       sh "git clone ${CodeLoc} ."        
     } else {
         error 'Unknown Source code repository. Only GIT and SVN are supported'
     }
